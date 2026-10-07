@@ -15,7 +15,7 @@ def make_car(desired_v:float=20.0, dt:float=0.1) -> dict:
         "step" : 0,
     
         #hint: use these variables in the integral and derivative portion of your PID control (steps 5 and 6 )
-        "error_prev" : None,
+        "error_prev" : 0,
         "net_integral" : 0.0
     }
     return car_state_dictionary
@@ -41,14 +41,22 @@ def update(car: dict, throttle_perc: float, mass: float = 1000, max_throttle_for
 
 
 def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D: float = 0.0) -> tuple[float, float]:
-        #input: car["v"], car["desired_v"] (floats)
-        #output: desired acceleration and error tuple(float, float)
-        pass # delete this line and write your PID code here
+    #input: car["v"], car["desired_v"] (floats)
+    #output: desired acceleration and error tuple(float, float) 
+    v_error = car["desired_v"] - car["v"]
+    gain = K_P * v_error
+    car["net_integral"] += K_I * v_error * car["dt"]
+    anticipation = K_D * ((v_error - car["error_prev"]) / car["dt"])
 
+    desired_a = gain + anticipation + car["net_integral"] # my goat PDI
+    return (desired_a, v_error)
 
 
 
 def acceleration_to_throttle_percentage(acceleration_desired: float, mass: float = 1000, max_throttle_force: float = 5000) -> float:
-        #input: desired_acceleration(float)
-        #output: throttle percentage (float, -1 to 1)
-        pass # delete this line and write your code to convert desired acceleration to throttle here
+    #input: desired_acceleration(float)
+    #output: throttle percentage (float, -1 to 1)
+    max_a = max_throttle_force / mass
+    percentage = acceleration_desired / max_a
+    return np.clip(percentage)
+    
