@@ -20,6 +20,17 @@ dt_axis = np.linspace(0, DESIRED_TIME_S, STEPS)
 
 
 def run_simulation(kp: float, ki: float, kd: float):
+    """
+    Simulates the car's motion over time using the given PID gains.
+
+    Inputs:
+    kp: float, proportional gain (K_P)
+    ki: float, integral gain (K_I)
+    kd: float, derivative gain (K_D)
+
+    Outputs:
+    tuple[np.ndarray, np.ndarray, np.ndarray]: position, velocity, and error arrays over each time step
+    """
     car = make_car(desired_v=20.0, dt=DT)
     position = np.zeros(STEPS)
     velocity = np.zeros(STEPS)
@@ -84,6 +95,16 @@ tb_kd = TextBox(ax_kd, "K_D ", initial=str(K_D))
 
 
 def update_plot(_=None):
+    """
+    Reads PID gains from the text boxes, re-runs the simulation, and updates the plots.
+    Triggered when a user enters a new gain value into any PID text box.
+
+    Inputs:
+    _: text string passed by TextBox on_submit event (optional, unused)
+
+    Outputs:
+    None, but updates the plot lines and redraws the canvas
+    """
     try:
         kp = float(tb_kp.text)
         ki = float(tb_ki.text)
