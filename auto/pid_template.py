@@ -47,8 +47,8 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
     gain = K_P * v_error
     car["net_integral"] += K_I * v_error * car["dt"]
     anticipation = K_D * ((v_error - car["error_prev"]) / car["dt"])
-
     desired_a = gain + anticipation + car["net_integral"] # my goat PDI
+    car["error_prev"] = v_error
     return (desired_a, v_error)
 
 
