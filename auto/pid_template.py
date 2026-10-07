@@ -12,7 +12,7 @@ def make_car(desired_v: float = 20.0, dt: float = 0.1) -> dict:
     Outputs:
     dict: dictionary containing initialized vehicle state variables
     """
-    car_state_dictionary : dict[str, float] = {
+    car : dict[str, float] = {
         "v" : 0, #velocity of your car 
         "a" : 0, #acceleration of your car
         "t" : 0, #time of your car
@@ -25,7 +25,7 @@ def make_car(desired_v: float = 20.0, dt: float = 0.1) -> dict:
         "error_prev" : 0,
         "net_integral" : 0.0
     }
-    return car_state_dictionary
+    return car
 
 def update(car: dict, throttle_perc: float, mass: float = 1000, max_throttle_force: float = 5000, friction: float = 2.0) -> None:
     """
@@ -64,10 +64,15 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
     tuple[float, float]: (desired_a, error) desired acceleration and current velocity error
     """
     v_error = car["desired_v"] - car["v"]
+    # P :
     gain = K_P * v_error
+    # I :
     car["net_integral"] += K_I * v_error * car["dt"]
+    # D :
     anticipation = K_D * ((v_error - car["error_prev"]) / car["dt"])
-    desired_a = gain + anticipation + car["net_integral"] # my goat PDI
+    # All together now
+    desired_a = gain + anticipation + car["net_integral"] # my goat PDI > PID
+    # don't forget!
     car["error_prev"] = v_error
     return (desired_a, v_error)
 
@@ -87,5 +92,5 @@ def acceleration_to_throttle_percentage(acceleration_desired: float, mass: float
     """
     max_a = max_throttle_force / mass
     percentage = acceleration_desired / max_a
-    return np.clip(percentage)
+    return np.clip(percentage, -1, 1)
     
