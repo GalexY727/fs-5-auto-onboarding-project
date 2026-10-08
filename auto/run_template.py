@@ -213,128 +213,134 @@ def update_response_marker(axis, artists: tuple, coordinate, title: str) -> None
     label.set_text(f"{title} ({time:.2f} s)")
 
 
-# Initial simulation run and metrics calculation
-velocity_over_time, drag_over_time, error_over_time = run_simulation(K_P, K_I, K_D)
-metrics, points, bounds = calculate_metrics(
-    dt_axis, velocity_over_time, DESIRED_V, error=error_over_time, drag=drag_over_time
-)
+def main() -> None:
+    """Create the tuning window and register its callbacks."""
+    # Initial simulation run and metrics calculation
+    velocity_over_time, drag_over_time, error_over_time = run_simulation(K_P, K_I, K_D)
+    metrics, points, bounds = calculate_metrics(
+        dt_axis, velocity_over_time, DESIRED_V, error=error_over_time, drag=drag_over_time
+    )
 
-# Single graph figure setup with space for right-side controls and bottom fields
-fig, ax1 = plt.subplots(figsize=(11, 7))
-plt.subplots_adjust(left=0.08, right=0.73, top=0.92, bottom=0.29)
+    # Single graph figure setup with space for right-side controls and bottom fields
+    fig, ax1 = plt.subplots(figsize=(11, 7))
+    plt.subplots_adjust(left=0.08, right=0.73, top=0.92, bottom=0.29)
 
-# Primary y-axis: Velocity (m/s) and Error (m/s)
-line_vel, = ax1.plot(dt_axis, velocity_over_time, label="Velocity (m/s)", color="tab:blue", linewidth=2)
-line_err, = ax1.plot(dt_axis, error_over_time, label="Error (m/s)", color="tab:orange", linestyle="--", linewidth=1.8)
-line_target = ax1.axhline(DESIRED_V, color="gray", linestyle=":", alpha=0.6, label=f"Target ({DESIRED_V:g} m/s)")
-ax1.set_xlabel("Time (s)", labelpad=65, fontsize=10)
-ax1.set_ylabel("Velocity / Error (m/s)")
-ax1.set_title("Vehicle Velocity, Error, and Aerodynamic Drag over Time")
-ax1.grid(True)
-ax1.set_xlim(bounds["x_min"], bounds["x_max"])
-ax1.set_ylim(bounds["y1_min"], bounds["y1_max"])
-
-# Secondary y-axis: Aerodynamic Drag Force (N)
-ax2 = ax1.twinx()
-line_drag, = ax2.plot(dt_axis, drag_over_time, label="Drag Force (N)", color="tab:green", linewidth=2)
-ax2.set_ylabel("Drag Force (N)", color="tab:green")
-ax2.tick_params(axis="y", labelcolor="tab:green")
-ax2.set_ylim(bounds["y2_min"], bounds["y2_max"])
-
-# Combined legend placed in the right center
-lines = [line_vel, line_err, line_drag, line_target]
-labels = [line.get_label() for line in lines]
-ax1.legend(lines, labels, loc="center right")
-
-# Metric display fields placed under the bottom of the graph
-bbox_props = dict(boxstyle="round,pad=0.6", facecolor="#f8f9fa", edgecolor="#cccccc", linewidth=1.2)
-txt_rise = fig.text(0.19, 0.04, f"Rise Time (10-90%)\n{metrics['rise']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
-txt_settle = fig.text(0.41, 0.04, f"{SETTLING_LABEL}\n{metrics['settle']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
-txt_overshoot = fig.text(0.63, 0.04, f"Max Overshoot\n{metrics['overshoot']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
-
-# The same artists and update logic serve all four response events.
-marker_styles = {
-    "pt_10": ("Rise Start (10%)", "purple"),
-    "pt_90": ("Rise End (90%)", "purple"),
-    "pt_peak": ("Max Overshoot", "crimson"),
-    "pt_settle": (SETTLING_LABEL, "darkcyan"),
-}
-markers = {
-    name: create_response_marker(ax1, color)
-    for name, (_, color) in marker_styles.items()
-}
-
-
-def update_markups(points: dict) -> None:
-    """Refresh the response markers using the current graph limits."""
-    for name, (title, _) in marker_styles.items():
-        update_response_marker(ax1, markers[name], points[name], title)
-
-
-# Initialize markups
-update_markups(points)
-
-# PID gain text fields on the right
-input_status = fig.text(0.90, 0.30, "", fontsize=8, color="crimson", ha="center")
-fig.text(0.91, 0.68, "PID Gains", fontsize=12, fontweight="bold", ha="center")
-
-ax_kp = fig.add_axes([0.87, 0.59, 0.08, 0.045])
-ax_ki = fig.add_axes([0.87, 0.51, 0.08, 0.045])
-ax_kd = fig.add_axes([0.87, 0.43, 0.08, 0.045])
-
-tb_kp = TextBox(ax_kp, "K_P ", initial=str(K_P))
-tb_ki = TextBox(ax_ki, "K_I ", initial=str(K_I))
-tb_kd = TextBox(ax_kd, "K_D ", initial=str(K_D))
-
-fig.text(0.91, 0.37, "(Press Enter to update)", fontsize=8.5, color="gray", ha="center")
-
-
-def update_plot(_=None):
-    """
-    Reads PID gains from the text boxes, re-runs the simulation, and updates the plot, markups, and metrics.
-    Triggered when a user enters a new gain value into any PID text box.
-
-    Inputs:
-    _: text string passed by TextBox on_submit event (optional, unused)
-
-    Outputs:
-    None, but updates the plot lines, markup indicators, metric displays, and redraws the canvas
-    """
-    try:
-        kp = float(tb_kp.text)
-        ki = float(tb_ki.text)
-        kd = float(tb_kd.text)
-        vel, drag, err = run_simulation(kp, ki, kd)
-    except (ValueError, OverflowError):
-        input_status.set_text("Enter finite gains.\nRun must remain finite.")
-        fig.canvas.draw_idle()
-        return
-
-    input_status.set_text("")
-
-    line_vel.set_ydata(vel)
-    line_err.set_ydata(err)
-    line_drag.set_ydata(drag)
-
-    # Recalculate metrics, markups, and bounds
-    metrics, points, bounds = calculate_metrics(dt_axis, vel, DESIRED_V, error=err, drag=drag)
-
-    # Apply the padded graph limits before positioning the markers.
+    # Primary y-axis: Velocity (m/s) and Error (m/s)
+    line_vel, = ax1.plot(dt_axis, velocity_over_time, label="Velocity (m/s)", color="tab:blue", linewidth=2)
+    line_err, = ax1.plot(dt_axis, error_over_time, label="Error (m/s)", color="tab:orange", linestyle="--", linewidth=1.8)
+    line_target = ax1.axhline(DESIRED_V, color="gray", linestyle=":", alpha=0.6, label=f"Target ({DESIRED_V:g} m/s)")
+    ax1.set_xlabel("Time (s)", labelpad=65, fontsize=10)
+    ax1.set_ylabel("Velocity / Error (m/s)")
+    ax1.set_title("Vehicle Velocity, Error, and Aerodynamic Drag over Time")
+    ax1.grid(True)
+    ax1.set_xlim(bounds["x_min"], bounds["x_max"])
     ax1.set_ylim(bounds["y1_min"], bounds["y1_max"])
+
+    # Secondary y-axis: Aerodynamic Drag Force (N)
+    ax2 = ax1.twinx()
+    line_drag, = ax2.plot(dt_axis, drag_over_time, label="Drag Force (N)", color="tab:green", linewidth=2)
+    ax2.set_ylabel("Drag Force (N)", color="tab:green")
+    ax2.tick_params(axis="y", labelcolor="tab:green")
     ax2.set_ylim(bounds["y2_min"], bounds["y2_max"])
 
+    # Combined legend placed in the right center
+    lines = [line_vel, line_err, line_drag, line_target]
+    labels = [line.get_label() for line in lines]
+    ax1.legend(lines, labels, loc="center right")
+
+    # Metric display fields placed under the bottom of the graph
+    bbox_props = dict(boxstyle="round,pad=0.6", facecolor="#f8f9fa", edgecolor="#cccccc", linewidth=1.2)
+    txt_rise = fig.text(0.19, 0.04, f"Rise Time (10-90%)\n{metrics['rise']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
+    txt_settle = fig.text(0.41, 0.04, f"{SETTLING_LABEL}\n{metrics['settle']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
+    txt_overshoot = fig.text(0.63, 0.04, f"Max Overshoot\n{metrics['overshoot']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
+
+    # The same artists and update logic serve all four response events.
+    marker_styles = {
+        "pt_10": ("Rise Start (10%)", "purple"),
+        "pt_90": ("Rise End (90%)", "purple"),
+        "pt_peak": ("Max Overshoot", "crimson"),
+        "pt_settle": (SETTLING_LABEL, "darkcyan"),
+    }
+    markers = {
+        name: create_response_marker(ax1, color)
+        for name, (_, color) in marker_styles.items()
+    }
+
+
+    def update_markups(points: dict) -> None:
+        """Refresh the response markers using the current graph limits."""
+        for name, (title, _) in marker_styles.items():
+            update_response_marker(ax1, markers[name], points[name], title)
+
+
+    # Initialize markups
     update_markups(points)
 
-    # Update bottom cards
-    txt_rise.set_text(f"Rise Time (10-90%)\n{metrics['rise']}")
-    txt_settle.set_text(f"{SETTLING_LABEL}\n{metrics['settle']}")
-    txt_overshoot.set_text(f"Max Overshoot\n{metrics['overshoot']}")
+    # PID gain text fields on the right
+    input_status = fig.text(0.90, 0.30, "", fontsize=8, color="crimson", ha="center")
+    fig.text(0.91, 0.68, "PID Gains", fontsize=12, fontweight="bold", ha="center")
 
-    fig.canvas.draw_idle()
+    ax_kp = fig.add_axes([0.87, 0.59, 0.08, 0.045])
+    ax_ki = fig.add_axes([0.87, 0.51, 0.08, 0.045])
+    ax_kd = fig.add_axes([0.87, 0.43, 0.08, 0.045])
+
+    tb_kp = TextBox(ax_kp, "K_P ", initial=str(K_P))
+    tb_ki = TextBox(ax_ki, "K_I ", initial=str(K_I))
+    tb_kd = TextBox(ax_kd, "K_D ", initial=str(K_D))
+
+    fig.text(0.91, 0.37, "(Press Enter to update)", fontsize=8.5, color="gray", ha="center")
 
 
-tb_kp.on_submit(update_plot)
-tb_ki.on_submit(update_plot)
-tb_kd.on_submit(update_plot)
+    def update_plot(_=None):
+        """
+        Reads PID gains from the text boxes, re-runs the simulation, and updates the plot, markups, and metrics.
+        Triggered when a user enters a new gain value into any PID text box.
 
-plt.show()
+        Inputs:
+        _: text string passed by TextBox on_submit event (optional, unused)
+
+        Outputs:
+        None, but updates the plot lines, markup indicators, metric displays, and redraws the canvas
+        """
+        try:
+            kp = float(tb_kp.text)
+            ki = float(tb_ki.text)
+            kd = float(tb_kd.text)
+            vel, drag, err = run_simulation(kp, ki, kd)
+        except (ValueError, OverflowError):
+            input_status.set_text("Enter finite gains.\nRun must remain finite.")
+            fig.canvas.draw_idle()
+            return
+
+        input_status.set_text("")
+
+        line_vel.set_ydata(vel)
+        line_err.set_ydata(err)
+        line_drag.set_ydata(drag)
+
+        # Recalculate metrics, markups, and bounds
+        metrics, points, bounds = calculate_metrics(dt_axis, vel, DESIRED_V, error=err, drag=drag)
+
+        # Apply the padded graph limits before positioning the markers.
+        ax1.set_ylim(bounds["y1_min"], bounds["y1_max"])
+        ax2.set_ylim(bounds["y2_min"], bounds["y2_max"])
+
+        update_markups(points)
+
+        # Update bottom cards
+        txt_rise.set_text(f"Rise Time (10-90%)\n{metrics['rise']}")
+        txt_settle.set_text(f"{SETTLING_LABEL}\n{metrics['settle']}")
+        txt_overshoot.set_text(f"Max Overshoot\n{metrics['overshoot']}")
+
+        fig.canvas.draw_idle()
+
+
+    tb_kp.on_submit(update_plot)
+    tb_ki.on_submit(update_plot)
+    tb_kd.on_submit(update_plot)
+
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
