@@ -1,11 +1,3 @@
-"""Interactively tune a PID response for a positive velocity step from rest.
-
-Crossing times use recorded samples, so their resolution is DT seconds.
-Settling means staying within 1% for the remainder of the recorded run.
-The original vehicle model uses constant friction; air drag is plotted as a
-calculated observation and does not affect vehicle motion.
-"""
-
 import matplotlib.pyplot as plt
 from matplotlib.widgets import TextBox
 import numpy as np
