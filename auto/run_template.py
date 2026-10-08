@@ -48,17 +48,26 @@ def run_simulation(kp: float, ki: float, kd: float):
     return velocity, drag_feedforward, error
 
 
-def calculate_metrics(time: np.ndarray, velocity: np.ndarray, target_v: float = DESIRED_V):
+def calculate_metrics(
+    time: np.ndarray,
+    velocity: np.ndarray,
+    target_v: float = DESIRED_V,
+    error: np.ndarray = None,
+    drag: np.ndarray = None,
+):
     """
-    Calculates step response metrics and key characteristic points on the velocity response.
+    Calculates step response metrics, key characteristic points, and graph display bounds.
 
     Inputs:
     time: np.ndarray, array of simulation time points
     velocity: np.ndarray, array of vehicle velocity values over time
     target_v: float, target steady-state velocity in m/s (default 20.0)
+    error: np.ndarray (optional), array of velocity error values over time
+    drag: np.ndarray (optional), array of aerodynamic drag force values over time
 
     Outputs:
-    tuple[dict, dict]: (metrics, points) containing metric display strings and markup coordinates
+    tuple[dict, dict, dict]: (metrics, points, bounds) containing metric display strings,
+                             markup coordinates, and axis display bounds
     """
     # Rise time (10% to 90% of target_v)
     idx_10 = np.where(velocity >= 0.1 * target_v)[0]
@@ -93,11 +102,63 @@ def calculate_metrics(time: np.ndarray, velocity: np.ndarray, target_v: float = 
         pt_settle = None
         settle_str = "N/A"
 
+    # Ensure error and drag arrays for bounds calculation
+    if error is None:
+        error = target_v - velocity
+    if drag is None:
+        drag = np.array([calculate_air_drag(v) for v in velocity])
+
+    # Calculate graph bounds so curves never exceed window limits
+    vel_min = float(np.min(velocity))
+    vel_max = float(np.max(velocity))
+    err_min = float(np.min(error))
+    err_max = float(np.max(error))
+
+    y1_data_min = min(vel_min, err_min)
+    y1_data_max = max(vel_max, err_max, float(target_v))
+    y1_span = max(y1_data_max - y1_data_min, 1.0)
+
+    # Primary y-axis (Velocity & Error) bounds
+    if y1_data_min >= 0.0:
+        y1_min = 0.0
+    else:
+        y1_min = y1_data_min - 0.08 * y1_span
+    y1_max = y1_data_max + 0.12 * y1_span
+
+    # Secondary y-axis (Aerodynamic Drag Force) bounds
+    drag_data_min = float(np.min(drag))
+    drag_data_max = float(np.max(drag))
+    drag_span = max(drag_data_max - drag_data_min, 1.0)
+
+    if drag_data_min >= 0.0:
+        y2_min = 0.0
+    else:
+        y2_min = drag_data_min - 0.08 * drag_span
+    y2_max = max(10.0, drag_data_max + 0.15 * drag_span)
+
+    # Time (x-axis) bounds
+    x_min = float(np.min(time))
+    x_max = float(np.max(time))
+
+    bounds = {
+        "y1_min": y1_min,
+        "y1_max": y1_max,
+        "y2_min": y2_min,
+        "y2_max": y2_max,
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y1_min,
+        "y_max": y1_max,
+        "drag_min": y2_min,
+        "drag_max": y2_max,
+    }
+
     metrics = {
         "rise": rise_str,
         "settle": settle_str,
         "overshoot": overshoot_str,
         "overshoot_pct": overshoot_pct,
+        "bounds": bounds,
     }
     points = {
         "pt_10": pt_10,
@@ -105,12 +166,14 @@ def calculate_metrics(time: np.ndarray, velocity: np.ndarray, target_v: float = 
         "pt_peak": pt_peak,
         "pt_settle": pt_settle,
     }
-    return metrics, points
+    return metrics, points, bounds
 
 
 # Initial simulation run and metrics calculation
 velocity_over_dt, drag_over_dt, error_over_dt = run_simulation(K_P, K_I, K_D)
-metrics, points = calculate_metrics(dt_axis, velocity_over_dt, DESIRED_V)
+metrics, points, bounds = calculate_metrics(
+    dt_axis, velocity_over_dt, DESIRED_V, error=error_over_dt, drag=drag_over_dt
+)
 
 # Single graph figure setup with space for right-side controls and bottom fields
 fig, ax1 = plt.subplots(figsize=(11, 7))
@@ -124,18 +187,15 @@ ax1.set_xlabel("Time (s)", labelpad=42, fontsize=10)
 ax1.set_ylabel("Velocity / Error (m/s)")
 ax1.set_title("Vehicle Velocity, Error, and Aerodynamic Drag over Time")
 ax1.grid(True)
-if np.min(error_over_dt) >= 0:
-    ax1.set_ylim(bottom=0)
-else:
-    ax1.set_ylim(bottom=np.min(error_over_dt) - 0.5)
-ax1.margins(y=0.15)
+ax1.set_xlim(bounds["x_min"], bounds["x_max"])
+ax1.set_ylim(bounds["y1_min"], bounds["y1_max"])
 
 # Secondary y-axis: Aerodynamic Drag Force (N)
 ax2 = ax1.twinx()
 line_drag, = ax2.plot(dt_axis, drag_over_dt, label="Drag Force (N)", color="tab:green", linewidth=2)
 ax2.set_ylabel("Drag Force (N)", color="tab:green")
 ax2.tick_params(axis="y", labelcolor="tab:green")
-ax2.margins(y=0.15)
+ax2.set_ylim(bounds["y2_min"], bounds["y2_max"])
 
 # Combined legend placed in the right center
 lines = [line_vel, line_err, line_drag, line_target]
@@ -303,20 +363,13 @@ def update_plot(_=None):
     line_err.set_ydata(err)
     line_drag.set_ydata(drag)
 
-    ax1.relim()
-    ax1.autoscale_view(scalex=False, scaley=True)
-    if np.min(err) >= 0:
-        ax1.set_ylim(bottom=0)
-    else:
-        ax1.set_ylim(bottom=np.min(err) - 0.5)
-    ax1.margins(y=0.15)
+    # Recalculate metrics, markups, and bounds
+    mets, pts, bnds = calculate_metrics(dt_axis, vel, DESIRED_V, error=err, drag=drag)
 
-    ax2.relim()
-    ax2.autoscale_view(scalex=False, scaley=True)
-    ax2.margins(y=0.15)
+    # Apply calculated bounds so curves never exceed window limits
+    ax1.set_ylim(bnds["y1_min"], bnds["y1_max"])
+    ax2.set_ylim(bnds["y2_min"], bnds["y2_max"])
 
-    # Recalculate metrics & markups
-    mets, pts = calculate_metrics(dt_axis, vel, DESIRED_V)
     update_markups(pts, mets)
 
     # Update bottom cards
