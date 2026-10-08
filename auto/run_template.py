@@ -1,3 +1,11 @@
+"""Interactively tune a PID response for a positive velocity step from rest.
+
+Crossing times use recorded samples, so their resolution is DT seconds.
+Settling means staying within 1% for the remainder of the recorded run.
+The original vehicle model uses constant friction; air drag is plotted as a
+calculated observation and does not affect vehicle motion.
+"""
+
 import matplotlib.pyplot as plt
 from matplotlib.widgets import TextBox
 import numpy as np
@@ -24,7 +32,7 @@ SETTLING_TOLERANCE = 0.01
 SETTLING_LABEL = f"Settling Time (±{SETTLING_TOLERANCE:.0%})"
 
 
-def run_simulation(kp: float, ki: float, kd: float):
+def run_simulation(kp: float, ki: float, kd: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Simulates the car's motion over time using the given PID gains.
 
@@ -59,8 +67,8 @@ def calculate_metrics(
     time: np.ndarray,
     velocity: np.ndarray,
     target_v: float = DESIRED_V,
-    error: np.ndarray = None,
-    drag: np.ndarray = None,
+    error: np.ndarray | None = None,
+    drag: np.ndarray | None = None,
 ):
     """
     Calculates step response metrics, key characteristic points, and graph display bounds.
@@ -124,7 +132,7 @@ def calculate_metrics(
     if drag is None:
         drag = np.array([calculate_air_drag(v) for v in velocity])
 
-    # Calculate graph bounds so curves never exceed window limits
+    # Pad the data ranges to keep the curves visible.
     vel_min = float(np.min(velocity))
     vel_max = float(np.max(velocity))
     err_min = float(np.min(error))
@@ -213,13 +221,13 @@ metrics, points, bounds = calculate_metrics(
 
 # Single graph figure setup with space for right-side controls and bottom fields
 fig, ax1 = plt.subplots(figsize=(11, 7))
-plt.subplots_adjust(left=0.08, right=0.73, top=0.92, bottom=0.25)
+plt.subplots_adjust(left=0.08, right=0.73, top=0.92, bottom=0.29)
 
 # Primary y-axis: Velocity (m/s) and Error (m/s)
 line_vel, = ax1.plot(dt_axis, velocity_over_time, label="Velocity (m/s)", color="tab:blue", linewidth=2)
 line_err, = ax1.plot(dt_axis, error_over_time, label="Error (m/s)", color="tab:orange", linestyle="--", linewidth=1.8)
 line_target = ax1.axhline(DESIRED_V, color="gray", linestyle=":", alpha=0.6, label=f"Target ({DESIRED_V:g} m/s)")
-ax1.set_xlabel("Time (s)", labelpad=42, fontsize=10)
+ax1.set_xlabel("Time (s)", labelpad=65, fontsize=10)
 ax1.set_ylabel("Velocity / Error (m/s)")
 ax1.set_title("Vehicle Velocity, Error, and Aerodynamic Drag over Time")
 ax1.grid(True)
@@ -311,7 +319,7 @@ def update_plot(_=None):
     # Recalculate metrics, markups, and bounds
     metrics, points, bounds = calculate_metrics(dt_axis, vel, DESIRED_V, error=err, drag=drag)
 
-    # Apply calculated bounds so curves never exceed window limits
+    # Apply the padded graph limits before positioning the markers.
     ax1.set_ylim(bounds["y1_min"], bounds["y1_max"])
     ax2.set_ylim(bounds["y2_min"], bounds["y2_max"])
 
