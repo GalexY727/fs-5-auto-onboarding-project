@@ -13,6 +13,7 @@ from pid_template import (
 K_P = 1.0
 K_I = 0.0001
 K_D = 0.025
+DESIRED_V = 20.0
 
 DESIRED_TIME_S = 75
 DT = 0.02
@@ -30,58 +31,239 @@ def run_simulation(kp: float, ki: float, kd: float):
     kd: float, derivative gain (K_D)
 
     Outputs:
-    tuple[np.ndarray, np.ndarray, np.ndarray]: velocity, air drag, and error arrays / time
+    tuple[np.ndarray, np.ndarray, np.ndarray]: velocity, feedforward air drag, and error arrays over each time step
     """
-    car = make_car(desired_v=20.0, dt=DT)
+    car = make_car(desired_v=DESIRED_V, dt=DT)
     velocity = np.zeros(STEPS)
-    drag_force = np.zeros(STEPS)
+    drag_feedforward = np.zeros(STEPS)
     error = np.zeros(STEPS)
 
     for i in range(STEPS):
         velocity[i] = car["v"]
-        drag_force[i] = calculate_air_drag(car["v"])
+        drag_feedforward[i] = calculate_air_drag(car["v"])
         desired_a, error[i] = calculate_desired_acceleration(car, kp, ki, kd)
         throttle_p = acceleration_to_throttle_percentage(desired_a)
         update(car, throttle_p)
 
-    return velocity, drag_force, error
+    return velocity, drag_feedforward, error
 
 
-# Initial run
+def calculate_metrics(time: np.ndarray, velocity: np.ndarray, target_v: float = DESIRED_V):
+    """
+    Calculates step response metrics and key characteristic points on the velocity response.
+
+    Inputs:
+    time: np.ndarray, array of simulation time points
+    velocity: np.ndarray, array of vehicle velocity values over time
+    target_v: float, target steady-state velocity in m/s (default 20.0)
+
+    Outputs:
+    tuple[dict, dict]: (metrics, points) containing metric display strings and markup coordinates
+    """
+    # Rise time (10% to 90% of target_v)
+    idx_10 = np.where(velocity >= 0.1 * target_v)[0]
+    idx_90 = np.where(velocity >= 0.9 * target_v)[0]
+    pt_10 = (time[idx_10[0]], velocity[idx_10[0]]) if len(idx_10) else None
+    pt_90 = (time[idx_90[0]], velocity[idx_90[0]]) if len(idx_90) else None
+    rise_str = f"{pt_90[0] - pt_10[0]:.2f} s" if pt_10 and pt_90 else "N/A"
+
+    # Max overshoot
+    peak_idx = int(np.argmax(velocity))
+    peak_v = float(velocity[peak_idx])
+    if peak_v > target_v:
+        overshoot_pct = ((peak_v - target_v) / target_v) * 100.0
+        pt_peak = (time[peak_idx], peak_v)
+        overshoot_str = f"{overshoot_pct:.2f}%"
+    else:
+        overshoot_pct = 0.0
+        pt_peak = None
+        overshoot_str = "0.00%"
+
+    # Settling time (within +/- 1% error band of target_v)
+    tolerance = 0.01 * target_v
+    out_of_band = np.where(np.abs(velocity - target_v) > tolerance)[0]
+    if len(out_of_band) == 0:
+        pt_settle = (time[0], velocity[0])
+        settle_str = f"{time[0]:.2f} s"
+    elif out_of_band[-1] < len(velocity) - 1:
+        s_idx = out_of_band[-1] + 1
+        pt_settle = (time[s_idx], velocity[s_idx])
+        settle_str = f"{time[s_idx]:.2f} s"
+    else:
+        pt_settle = None
+        settle_str = "N/A"
+
+    metrics = {
+        "rise": rise_str,
+        "settle": settle_str,
+        "overshoot": overshoot_str,
+        "overshoot_pct": overshoot_pct,
+    }
+    points = {
+        "pt_10": pt_10,
+        "pt_90": pt_90,
+        "pt_peak": pt_peak,
+        "pt_settle": pt_settle,
+    }
+    return metrics, points
+
+
+# Initial simulation run and metrics calculation
 velocity_over_dt, drag_over_dt, error_over_dt = run_simulation(K_P, K_I, K_D)
+metrics, points = calculate_metrics(dt_axis, velocity_over_dt, DESIRED_V)
 
-# Figure setup with space on the right for controls
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
-plt.subplots_adjust(left=0.08, right=0.73, hspace=0.25)
+# Single graph figure setup with space for right-side controls and bottom fields
+fig, ax1 = plt.subplots(figsize=(11, 7))
+plt.subplots_adjust(left=0.08, right=0.73, top=0.92, bottom=0.25)
 
-# Subplot 1: Velocity over time with Error layered
-line_vel, = ax1.plot(dt_axis, velocity_over_dt, label="Velocity (m/s)",     
-color="tab:blue")
-line_err1, = ax1.plot(dt_axis, error_over_dt, label="Error (m/s)",
-color="tab:orange", linestyle="--")
+# Primary y-axis: Velocity (m/s) and Error (m/s)
+line_vel, = ax1.plot(dt_axis, velocity_over_dt, label="Velocity (m/s)", color="tab:blue", linewidth=2)
+line_err, = ax1.plot(dt_axis, error_over_dt, label="Error (m/s)", color="tab:orange", linestyle="--", linewidth=1.8)
+line_target = ax1.axhline(DESIRED_V, color="gray", linestyle=":", alpha=0.6, label="Target (20 m/s)")
+ax1.set_xlabel("Time (s)", labelpad=42, fontsize=10)
 ax1.set_ylabel("Velocity / Error (m/s)")
-ax1.set_title("Velocity & Error over Time")
-ax1.legend(loc="upper right")
+ax1.set_title("Vehicle Velocity, Error, and Aerodynamic Drag over Time")
 ax1.grid(True)
+if np.min(error_over_dt) >= 0:
+    ax1.set_ylim(bottom=0)
+else:
+    ax1.set_ylim(bottom=np.min(error_over_dt) - 0.5)
+ax1.margins(y=0.15)
 
-# Subplot 2 Air Drag over time with Error layered
-line_drag, = ax2.plot(dt_axis, drag_over_dt, label="Feedforward Drag Force (N)", color="tab:green")
-ax2.set_xlabel("Time (s)")
+# Secondary y-axis: Aerodynamic Drag Force (N)
+ax2 = ax1.twinx()
+line_drag, = ax2.plot(dt_axis, drag_over_dt, label="Drag Force (N)", color="tab:green", linewidth=2)
 ax2.set_ylabel("Drag Force (N)", color="tab:green")
 ax2.tick_params(axis="y", labelcolor="tab:green")
-ax2.grid(True)
+ax2.margins(y=0.15)
 
-# Secondary y-axis for error on drag plot
-ax2_err = ax2.twinx()
-line_err2, = ax2_err.plot(dt_axis, error_over_dt, label="Error (m/s)", color="tab:orange", linestyle="--")
-ax2_err.set_ylabel("Error (m/s)", color="tab:orange")
-ax2_err.tick_params(axis="y", labelcolor="tab:orange")
+# Combined legend placed in the right center
+lines = [line_vel, line_err, line_drag, line_target]
+labels = [line.get_label() for line in lines]
+ax1.legend(lines, labels, loc="center right")
 
-# Combined legend for the bottom subplot
-lines_2 = [line_drag, line_err2]
-labels_2 = [line.get_label() for line in lines_2]
-ax2.legend(lines_2, labels_2, loc="center right")
-ax2.set_title("Velocity w/ Air Drag & Error over Time")
+# Metric display fields placed under the bottom of the graph
+bbox_props = dict(boxstyle="round,pad=0.6", facecolor="#f8f9fa", edgecolor="#cccccc", linewidth=1.2)
+txt_rise = fig.text(0.19, 0.04, f"Rise Time (10-90%)\n{metrics['rise']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
+txt_settle = fig.text(0.41, 0.04, f"Settling Time (±2%)\n{metrics['settle']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
+txt_overshoot = fig.text(0.63, 0.04, f"Max Overshoot\n{metrics['overshoot']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
+
+# Markup point markers and vertical drop lines (y <= vehicle velocity intercept point)
+line_vl_rise_start, = ax1.plot([], [], linestyle=":", color="purple", linewidth=1.5, alpha=0.85, zorder=3)
+line_pt_rise_start, = ax1.plot([], [], "o", color="purple", markersize=5, zorder=4)
+ann_rise_start = ax1.annotate(
+    "", xy=(0, 0), xycoords=("data", "axes fraction"),
+    xytext=(0, -8), textcoords="offset points",
+    ha="left", va="top", rotation=-45,
+    fontsize=8, fontweight="bold", color="purple", visible=False,
+)
+
+line_vl_rise_end, = ax1.plot([], [], linestyle=":", color="purple", linewidth=1.5, alpha=0.85, zorder=3)
+line_pt_rise_end, = ax1.plot([], [], "o", color="purple", markersize=5, zorder=4)
+ann_rise_end = ax1.annotate(
+    "", xy=(0, 0), xycoords=("data", "axes fraction"),
+    xytext=(0, -8), textcoords="offset points",
+    ha="left", va="top", rotation=-45,
+    fontsize=8, fontweight="bold", color="purple", visible=False,
+)
+
+line_vl_overshoot, = ax1.plot([], [], linestyle=":", color="crimson", linewidth=1.5, alpha=0.85, zorder=3)
+line_pt_overshoot, = ax1.plot([], [], "o", color="crimson", markersize=5, zorder=4)
+ann_overshoot = ax1.annotate(
+    "", xy=(0, 0), xycoords=("data", "axes fraction"),
+    xytext=(0, -8), textcoords="offset points",
+    ha="left", va="top", rotation=-45,
+    fontsize=8, fontweight="bold", color="crimson", visible=False,
+)
+
+line_vl_settle, = ax1.plot([], [], linestyle=":", color="darkcyan", linewidth=1.5, alpha=0.85, zorder=3)
+line_pt_settle, = ax1.plot([], [], "o", color="darkcyan", markersize=5, zorder=4)
+ann_settle = ax1.annotate(
+    "", xy=(0, 0), xycoords=("data", "axes fraction"),
+    xytext=(0, -8), textcoords="offset points",
+    ha="left", va="top", rotation=-45,
+    fontsize=8, fontweight="bold", color="darkcyan", visible=False,
+)
+
+
+def update_markups(pts: dict, mets: dict):
+    """
+    Updates the on-plot markup drop lines and x-axis labels for key response time points.
+    Lines extend from the x-axis (bottom) up to the intercept point on the vehicle velocity curve (y <= intercept),
+    with points labeled along the x-axis.
+
+    Inputs:
+    pts: dict, coordinates of rise start, rise end, max overshoot, and settling point
+    mets: dict, computed metric values and formatted strings
+
+    Outputs:
+    None, updates markup artists in-place
+    """
+    ymin = ax1.get_ylim()[0]
+    pt_10 = pts["pt_10"]
+    pt_90 = pts["pt_90"]
+    pt_peak = pts["pt_peak"]
+    pt_settle = pts["pt_settle"]
+
+    # Rise start (10%)
+    if pt_10:
+        line_pt_rise_start.set_data([pt_10[0]], [pt_10[1]])
+        line_pt_rise_start.set_visible(True)
+        line_vl_rise_start.set_data([pt_10[0], pt_10[0]], [ymin, pt_10[1]])
+        line_vl_rise_start.set_visible(True)
+        ann_rise_start.xy = (pt_10[0], 0)
+        ann_rise_start.set_text(f"Rise Start (10%) ({pt_10[0]:.1f}s)")
+        ann_rise_start.set_visible(True)
+    else:
+        line_pt_rise_start.set_visible(False)
+        line_vl_rise_start.set_visible(False)
+        ann_rise_start.set_visible(False)
+
+    # Rise end (90%)
+    if pt_90:
+        line_pt_rise_end.set_data([pt_90[0]], [pt_90[1]])
+        line_pt_rise_end.set_visible(True)
+        line_vl_rise_end.set_data([pt_90[0], pt_90[0]], [ymin, pt_90[1]])
+        line_vl_rise_end.set_visible(True)
+        ann_rise_end.xy = (pt_90[0], 0)
+        ann_rise_end.set_text(f"Rise End (90%) ({pt_90[0]:.1f}s)")
+        ann_rise_end.set_visible(True)
+    else:
+        line_pt_rise_end.set_visible(False)
+        line_vl_rise_end.set_visible(False)
+        ann_rise_end.set_visible(False)
+
+    # Max overshoot
+    if pt_peak:
+        line_pt_overshoot.set_data([pt_peak[0]], [pt_peak[1]])
+        line_pt_overshoot.set_visible(True)
+        line_vl_overshoot.set_data([pt_peak[0], pt_peak[0]], [ymin, pt_peak[1]])
+        line_vl_overshoot.set_visible(True)
+        ann_overshoot.xy = (pt_peak[0], 0)
+        ann_overshoot.set_text(f"Max Overshoot ({pt_peak[0]:.1f}s)")
+        ann_overshoot.set_visible(True)
+    else:
+        line_pt_overshoot.set_visible(False)
+        line_vl_overshoot.set_visible(False)
+        ann_overshoot.set_visible(False)
+
+    # Settling point (±2%)
+    if pt_settle:
+        line_pt_settle.set_data([pt_settle[0]], [pt_settle[1]])
+        line_pt_settle.set_visible(True)
+        line_vl_settle.set_data([pt_settle[0], pt_settle[0]], [ymin, pt_settle[1]])
+        line_vl_settle.set_visible(True)
+        ann_settle.xy = (pt_settle[0], 0)
+        ann_settle.set_text(f"Settling (±2%) ({pt_settle[0]:.1f}s)")
+        ann_settle.set_visible(True)
+    else:
+        line_pt_settle.set_visible(False)
+        line_vl_settle.set_visible(False)
+        ann_settle.set_visible(False)
+
+
+# Initialize markups
+update_markups(points, metrics)
 
 # PID gain text fields on the right
 fig.text(0.91, 0.68, "PID Gains", fontsize=12, fontweight="bold", ha="center")
@@ -94,17 +276,19 @@ tb_kp = TextBox(ax_kp, "K_P ", initial=str(K_P))
 tb_ki = TextBox(ax_ki, "K_I ", initial=str(K_I))
 tb_kd = TextBox(ax_kd, "K_D ", initial=str(K_D))
 
+fig.text(0.91, 0.37, "(Press Enter to update)", fontsize=8.5, color="gray", ha="center")
+
 
 def update_plot(_=None):
     """
-    Reads PID gains from the text boxes, re-runs the simulation, and updates the plots.
+    Reads PID gains from the text boxes, re-runs the simulation, and updates the plot, markups, and metrics.
     Triggered when a user enters a new gain value into any PID text box.
 
     Inputs:
     _: text string passed by TextBox on_submit event (optional, unused)
 
     Outputs:
-    None, but updates the plot lines and redraws the canvas
+    None, but updates the plot lines, markup indicators, metric displays, and redraws the canvas
     """
     try:
         kp = float(tb_kp.text)
@@ -116,16 +300,29 @@ def update_plot(_=None):
     vel, drag, err = run_simulation(kp, ki, kd)
 
     line_vel.set_ydata(vel)
-    line_err1.set_ydata(err)
+    line_err.set_ydata(err)
     line_drag.set_ydata(drag)
-    line_err2.set_ydata(err)
 
     ax1.relim()
-    ax1.autoscale_view()
+    ax1.autoscale_view(scalex=False, scaley=True)
+    if np.min(err) >= 0:
+        ax1.set_ylim(bottom=0)
+    else:
+        ax1.set_ylim(bottom=np.min(err) - 0.5)
+    ax1.margins(y=0.15)
+
     ax2.relim()
-    ax2.autoscale_view()
-    ax2_err.relim()
-    ax2_err.autoscale_view()
+    ax2.autoscale_view(scalex=False, scaley=True)
+    ax2.margins(y=0.15)
+
+    # Recalculate metrics & markups
+    mets, pts = calculate_metrics(dt_axis, vel, DESIRED_V)
+    update_markups(pts, mets)
+
+    # Update bottom cards
+    txt_rise.set_text(f"Rise Time (10-90%)\n{mets['rise']}")
+    txt_settle.set_text(f"Settling Time (±2%)\n{mets['settle']}")
+    txt_overshoot.set_text(f"Max Overshoot\n{mets['overshoot']}")
 
     fig.canvas.draw_idle()
 
