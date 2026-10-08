@@ -69,7 +69,10 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
     # I :
     car["net_integral"] += K_I * v_error * car["dt"]
     # D :
-    anticipation = K_D * ((v_error - car["error_prev"]) / car["dt"])
+    # No previous measurement exists on the first simulation step.
+    anticipation = 0.0
+    if car["step"] > 0:
+        anticipation = K_D * ((v_error - car["error_prev"]) / car["dt"])
     # All together now
     desired_a = gain + anticipation + car["net_integral"] # my goat PDI > PID
     # don't forget!
