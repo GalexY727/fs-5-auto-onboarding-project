@@ -36,6 +36,8 @@ def run_simulation(kp: float, ki: float, kd: float):
     Outputs:
     tuple[np.ndarray, np.ndarray, np.ndarray]: velocity, feedforward air drag, and error arrays over each time step
     """
+    if not np.all(np.isfinite([kp, ki, kd])):
+        raise ValueError("PID gains must be finite numbers.")
     car = make_car(desired_v=DESIRED_V, dt=DT)
     velocity = np.zeros(STEPS)
     drag_feedforward = np.zeros(STEPS)
@@ -45,6 +47,8 @@ def run_simulation(kp: float, ki: float, kd: float):
         velocity[i] = car["v"]
         drag_feedforward[i] = calculate_air_drag(car["v"])
         desired_a, error[i] = calculate_desired_acceleration(car, kp, ki, kd)
+        if not np.isfinite(desired_a):
+            raise ValueError("Simulation produced a nonfinite command.")
         throttle_p = acceleration_to_throttle_percentage(desired_a)
         update(car, throttle_p)
 
@@ -72,6 +76,15 @@ def calculate_metrics(
     tuple[dict, dict, dict]: (metrics, points, bounds) containing metric display strings,
                              markup coordinates, and axis display bounds
     """
+    if (
+        time.ndim != 1 or velocity.ndim != 1 or time.size != velocity.size
+        or time.size < 2 or not np.all(np.isfinite(time))
+        or not np.all(np.isfinite(velocity)) or np.any(np.diff(time) <= 0)
+    ):
+        raise ValueError("Provide matching finite arrays and increasing timestamps.")
+    if not np.isfinite(target_v) or target_v <= 0 or velocity[0] != 0:
+        raise ValueError("Metrics require a positive target and a start from rest.")
+
     # Rise time (10% to 90% of target_v)
     idx_10 = np.where(velocity >= 0.1 * target_v)[0]
     idx_90 = np.where(velocity >= 0.9 * target_v)[0]
@@ -329,6 +342,7 @@ def update_markups(pts: dict, mets: dict):
 update_markups(points, metrics)
 
 # PID gain text fields on the right
+input_status = fig.text(0.90, 0.30, "", fontsize=8, color="crimson", ha="center")
 fig.text(0.91, 0.68, "PID Gains", fontsize=12, fontweight="bold", ha="center")
 
 ax_kp = fig.add_axes([0.87, 0.59, 0.08, 0.045])
@@ -357,10 +371,13 @@ def update_plot(_=None):
         kp = float(tb_kp.text)
         ki = float(tb_ki.text)
         kd = float(tb_kd.text)
-    except ValueError:
+        vel, drag, err = run_simulation(kp, ki, kd)
+    except (ValueError, OverflowError):
+        input_status.set_text("Enter finite gains.\nRun must remain finite.")
+        fig.canvas.draw_idle()
         return
 
-    vel, drag, err = run_simulation(kp, ki, kd)
+    input_status.set_text("")
 
     line_vel.set_ydata(vel)
     line_err.set_ydata(err)
