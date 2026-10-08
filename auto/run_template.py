@@ -185,6 +185,32 @@ def calculate_metrics(
     return metrics, points, bounds
 
 
+def create_response_marker(axis, color: str) -> tuple:
+    """Create a guide line, point, and label for one response event."""
+    guide, = axis.plot([], [], ":", color=color, linewidth=1.5, alpha=0.85, zorder=3)
+    point, = axis.plot([], [], "o", color=color, markersize=5, zorder=4)
+    label = axis.annotate(
+        "", xy=(0, 0), xycoords=("data", "axes fraction"),
+        xytext=(0, -8), textcoords="offset points", ha="left", va="top",
+        rotation=-45, fontsize=8, fontweight="bold", color=color, visible=False,
+    )
+    return guide, point, label
+
+
+def update_response_marker(axis, artists: tuple, coordinate, title: str) -> None:
+    """Move an event marker, or hide it if that event was not reached."""
+    guide, point, label = artists
+    for artist in artists:
+        artist.set_visible(coordinate is not None)
+    if coordinate is None:
+        return
+    time, velocity = coordinate
+    guide.set_data([time, time], [axis.get_ylim()[0], velocity])
+    point.set_data([time], [velocity])
+    label.xy = (time, 0)
+    label.set_text(f"{title} ({time:.2f} s)")
+
+
 # Initial simulation run and metrics calculation
 velocity_over_dt, drag_over_dt, error_over_dt = run_simulation(K_P, K_I, K_D)
 metrics, points, bounds = calculate_metrics(
@@ -224,122 +250,27 @@ txt_rise = fig.text(0.19, 0.04, f"Rise Time (10-90%)\n{metrics['rise']}", ha="ce
 txt_settle = fig.text(0.41, 0.04, f"{SETTLING_LABEL}\n{metrics['settle']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
 txt_overshoot = fig.text(0.63, 0.04, f"Max Overshoot\n{metrics['overshoot']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
 
-# Markup point markers and vertical drop lines (y <= vehicle velocity intercept point)
-line_vl_rise_start, = ax1.plot([], [], linestyle=":", color="purple", linewidth=1.5, alpha=0.85, zorder=3)
-line_pt_rise_start, = ax1.plot([], [], "o", color="purple", markersize=5, zorder=4)
-ann_rise_start = ax1.annotate(
-    "", xy=(0, 0), xycoords=("data", "axes fraction"),
-    xytext=(0, -8), textcoords="offset points",
-    ha="left", va="top", rotation=-45,
-    fontsize=8, fontweight="bold", color="purple", visible=False,
-)
-
-line_vl_rise_end, = ax1.plot([], [], linestyle=":", color="purple", linewidth=1.5, alpha=0.85, zorder=3)
-line_pt_rise_end, = ax1.plot([], [], "o", color="purple", markersize=5, zorder=4)
-ann_rise_end = ax1.annotate(
-    "", xy=(0, 0), xycoords=("data", "axes fraction"),
-    xytext=(0, -8), textcoords="offset points",
-    ha="left", va="top", rotation=-45,
-    fontsize=8, fontweight="bold", color="purple", visible=False,
-)
-
-line_vl_overshoot, = ax1.plot([], [], linestyle=":", color="crimson", linewidth=1.5, alpha=0.85, zorder=3)
-line_pt_overshoot, = ax1.plot([], [], "o", color="crimson", markersize=5, zorder=4)
-ann_overshoot = ax1.annotate(
-    "", xy=(0, 0), xycoords=("data", "axes fraction"),
-    xytext=(0, -8), textcoords="offset points",
-    ha="left", va="top", rotation=-45,
-    fontsize=8, fontweight="bold", color="crimson", visible=False,
-)
-
-line_vl_settle, = ax1.plot([], [], linestyle=":", color="darkcyan", linewidth=1.5, alpha=0.85, zorder=3)
-line_pt_settle, = ax1.plot([], [], "o", color="darkcyan", markersize=5, zorder=4)
-ann_settle = ax1.annotate(
-    "", xy=(0, 0), xycoords=("data", "axes fraction"),
-    xytext=(0, -8), textcoords="offset points",
-    ha="left", va="top", rotation=-45,
-    fontsize=8, fontweight="bold", color="darkcyan", visible=False,
-)
+# The same artists and update logic serve all four response events.
+marker_styles = {
+    "pt_10": ("Rise Start (10%)", "purple"),
+    "pt_90": ("Rise End (90%)", "purple"),
+    "pt_peak": ("Max Overshoot", "crimson"),
+    "pt_settle": (SETTLING_LABEL, "darkcyan"),
+}
+markers = {
+    name: create_response_marker(ax1, color)
+    for name, (_, color) in marker_styles.items()
+}
 
 
-def update_markups(pts: dict, mets: dict):
-    """
-    Updates the on-plot markup drop lines and x-axis labels for key response time points.
-    Lines extend from the x-axis (bottom) up to the intercept point on the vehicle velocity curve (y <= intercept),
-    with points labeled along the x-axis.
-
-    Inputs:
-    pts: dict, coordinates of rise start, rise end, max overshoot, and settling point
-    mets: dict, computed metric values and formatted strings
-
-    Outputs:
-    None, updates markup artists in-place
-    """
-    ymin = ax1.get_ylim()[0]
-    pt_10 = pts["pt_10"]
-    pt_90 = pts["pt_90"]
-    pt_peak = pts["pt_peak"]
-    pt_settle = pts["pt_settle"]
-
-    # Rise start (10%)
-    if pt_10:
-        line_pt_rise_start.set_data([pt_10[0]], [pt_10[1]])
-        line_pt_rise_start.set_visible(True)
-        line_vl_rise_start.set_data([pt_10[0], pt_10[0]], [ymin, pt_10[1]])
-        line_vl_rise_start.set_visible(True)
-        ann_rise_start.xy = (pt_10[0], 0)
-        ann_rise_start.set_text(f"Rise Start (10%) ({pt_10[0]:.1f}s)")
-        ann_rise_start.set_visible(True)
-    else:
-        line_pt_rise_start.set_visible(False)
-        line_vl_rise_start.set_visible(False)
-        ann_rise_start.set_visible(False)
-
-    # Rise end (90%)
-    if pt_90:
-        line_pt_rise_end.set_data([pt_90[0]], [pt_90[1]])
-        line_pt_rise_end.set_visible(True)
-        line_vl_rise_end.set_data([pt_90[0], pt_90[0]], [ymin, pt_90[1]])
-        line_vl_rise_end.set_visible(True)
-        ann_rise_end.xy = (pt_90[0], 0)
-        ann_rise_end.set_text(f"Rise End (90%) ({pt_90[0]:.1f}s)")
-        ann_rise_end.set_visible(True)
-    else:
-        line_pt_rise_end.set_visible(False)
-        line_vl_rise_end.set_visible(False)
-        ann_rise_end.set_visible(False)
-
-    # Max overshoot
-    if pt_peak:
-        line_pt_overshoot.set_data([pt_peak[0]], [pt_peak[1]])
-        line_pt_overshoot.set_visible(True)
-        line_vl_overshoot.set_data([pt_peak[0], pt_peak[0]], [ymin, pt_peak[1]])
-        line_vl_overshoot.set_visible(True)
-        ann_overshoot.xy = (pt_peak[0], 0)
-        ann_overshoot.set_text(f"Max Overshoot ({pt_peak[0]:.1f}s)")
-        ann_overshoot.set_visible(True)
-    else:
-        line_pt_overshoot.set_visible(False)
-        line_vl_overshoot.set_visible(False)
-        ann_overshoot.set_visible(False)
-
-    # Settling point
-    if pt_settle:
-        line_pt_settle.set_data([pt_settle[0]], [pt_settle[1]])
-        line_pt_settle.set_visible(True)
-        line_vl_settle.set_data([pt_settle[0], pt_settle[0]], [ymin, pt_settle[1]])
-        line_vl_settle.set_visible(True)
-        ann_settle.xy = (pt_settle[0], 0)
-        ann_settle.set_text(f"{SETTLING_LABEL} ({pt_settle[0]:.1f}s)")
-        ann_settle.set_visible(True)
-    else:
-        line_pt_settle.set_visible(False)
-        line_vl_settle.set_visible(False)
-        ann_settle.set_visible(False)
+def update_markups(points: dict) -> None:
+    """Refresh the response markers using the current graph limits."""
+    for name, (title, _) in marker_styles.items():
+        update_response_marker(ax1, markers[name], points[name], title)
 
 
 # Initialize markups
-update_markups(points, metrics)
+update_markups(points)
 
 # PID gain text fields on the right
 input_status = fig.text(0.90, 0.30, "", fontsize=8, color="crimson", ha="center")
@@ -390,7 +321,7 @@ def update_plot(_=None):
     ax1.set_ylim(bnds["y1_min"], bnds["y1_max"])
     ax2.set_ylim(bnds["y2_min"], bnds["y2_max"])
 
-    update_markups(pts, mets)
+    update_markups(pts)
 
     # Update bottom cards
     txt_rise.set_text(f"Rise Time (10-90%)\n{mets['rise']}")
