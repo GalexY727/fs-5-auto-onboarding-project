@@ -19,7 +19,7 @@ from pid_template import (
 
 # Simulation parameters and initial gains
 K_P = 2.5
-K_I = 0.005
+K_I = 0.03
 K_D = 0.025
 DESIRED_V = 20.0
 
