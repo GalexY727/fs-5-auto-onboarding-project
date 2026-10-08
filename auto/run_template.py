@@ -6,6 +6,7 @@ from pid_template import (
     update,
     calculate_desired_acceleration,
     acceleration_to_throttle_percentage,
+    calculate_air_drag,
 )
 
 # Simulation parameters and initial gains
@@ -13,8 +14,8 @@ K_P = 1.0
 K_I = 0.0001
 K_D = 0.025
 
-DESIRED_TIME_S = 55
-DT = 0.1
+DESIRED_TIME_S = 75
+DT = 0.02
 STEPS = int(DESIRED_TIME_S / DT)
 dt_axis = np.linspace(0, DESIRED_TIME_S, STEPS)
 
@@ -29,25 +30,25 @@ def run_simulation(kp: float, ki: float, kd: float):
     kd: float, derivative gain (K_D)
 
     Outputs:
-    tuple[np.ndarray, np.ndarray, np.ndarray]: position, velocity, and error arrays over each time step
+    tuple[np.ndarray, np.ndarray, np.ndarray]: velocity, air drag, and error arrays / time
     """
     car = make_car(desired_v=20.0, dt=DT)
-    position = np.zeros(STEPS)
     velocity = np.zeros(STEPS)
+    drag_force = np.zeros(STEPS)
     error = np.zeros(STEPS)
 
     for i in range(STEPS):
-        position[i] = car["x"]
         velocity[i] = car["v"]
+        drag_force[i] = calculate_air_drag(car["v"])
         desired_a, error[i] = calculate_desired_acceleration(car, kp, ki, kd)
         throttle_p = acceleration_to_throttle_percentage(desired_a)
         update(car, throttle_p)
 
-    return position, velocity, error
+    return velocity, drag_force, error
 
 
 # Initial run
-position_over_dt, velocity_over_dt, error_over_dt = run_simulation(K_P, K_I, K_D)
+velocity_over_dt, drag_over_dt, error_over_dt = run_simulation(K_P, K_I, K_D)
 
 # Figure setup with space on the right for controls
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
@@ -63,24 +64,24 @@ ax1.set_title("Velocity & Error over Time")
 ax1.legend(loc="upper right")
 ax1.grid(True)
 
-# Subplot 2: Position over time with Error layered
-line_pos, = ax2.plot(dt_axis, position_over_dt, label="Position (m)", color="tab:green")
+# Subplot 2 Air Drag over time with Error layered
+line_drag, = ax2.plot(dt_axis, drag_over_dt, label="Feedforward Drag Force (N)", color="tab:green")
 ax2.set_xlabel("Time (s)")
-ax2.set_ylabel("Position (m)", color="tab:green")
+ax2.set_ylabel("Drag Force (N)", color="tab:green")
 ax2.tick_params(axis="y", labelcolor="tab:green")
 ax2.grid(True)
 
-# Secondary y-axis for error on position plot
+# Secondary y-axis for error on drag plot
 ax2_err = ax2.twinx()
 line_err2, = ax2_err.plot(dt_axis, error_over_dt, label="Error (m/s)", color="tab:orange", linestyle="--")
 ax2_err.set_ylabel("Error (m/s)", color="tab:orange")
 ax2_err.tick_params(axis="y", labelcolor="tab:orange")
 
 # Combined legend for the bottom subplot
-lines_2 = [line_pos, line_err2]
+lines_2 = [line_drag, line_err2]
 labels_2 = [line.get_label() for line in lines_2]
-ax2.legend(lines_2, labels_2, loc="upper left")
-ax2.set_title("Position & Error over Time")
+ax2.legend(lines_2, labels_2, loc="center right")
+ax2.set_title("Velocity w/ Air Drag & Error over Time")
 
 # PID gain text fields on the right
 fig.text(0.91, 0.68, "PID Gains", fontsize=12, fontweight="bold", ha="center")
@@ -112,11 +113,11 @@ def update_plot(_=None):
     except ValueError:
         return
 
-    pos, vel, err = run_simulation(kp, ki, kd)
+    vel, drag, err = run_simulation(kp, ki, kd)
 
     line_vel.set_ydata(vel)
     line_err1.set_ydata(err)
-    line_pos.set_ydata(pos)
+    line_drag.set_ydata(drag)
     line_err2.set_ydata(err)
 
     ax1.relim()

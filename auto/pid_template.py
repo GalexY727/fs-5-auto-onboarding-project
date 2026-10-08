@@ -93,4 +93,24 @@ def acceleration_to_throttle_percentage(acceleration_desired: float, mass: float
     max_a = max_throttle_force / mass
     percentage = acceleration_desired / max_a
     return np.clip(percentage, -1, 1)
+
+
+def calculate_air_drag(velocity: float, c_d: float = 0.47, rho: float = 1.225, radius: float = 0.4) -> float:
+    """
+    Calculates aerodynamic drag force using NASA's drag equation: D = 0.5 * C_d * rho * V^2 * A.
+    Acts as a sensor calculating air drag feedforward based on vehicle velocity.
+
+    Inputs:
+    velocity: float, current velocity of the vehicle in m/s
+    c_d: float, drag coefficient of the object (default 0.47 for a sphere)
+    rho: float, air density in kg/m^3 (default 1.225 for sea-level air)
+    radius: float, radius of the sphere in meters (default 0.4 m / 400 mm)
+
+    Outputs:
+    float: aerodynamic drag force (D) in Newtons
+    """
+    area = np.pi * (radius ** 2)
+    drag_force = 0.5 * c_d * rho * (velocity ** 2) * area
+    return drag_force
+
     
