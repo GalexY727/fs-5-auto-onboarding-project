@@ -34,25 +34,25 @@ def run_simulation(kp: float, ki: float, kd: float):
     kd: float, derivative gain (K_D)
 
     Outputs:
-    tuple[np.ndarray, np.ndarray, np.ndarray]: velocity, feedforward air drag, and error arrays over each time step
+    tuple[np.ndarray, np.ndarray, np.ndarray]: velocity, air drag force, and error arrays over each time step
     """
     if not np.all(np.isfinite([kp, ki, kd])):
         raise ValueError("PID gains must be finite numbers.")
     car = make_car(desired_v=DESIRED_V, dt=DT)
     velocity = np.zeros(STEPS)
-    drag_feedforward = np.zeros(STEPS)
+    drag_force = np.zeros(STEPS)
     error = np.zeros(STEPS)
 
     for i in range(STEPS):
         velocity[i] = car["v"]
-        drag_feedforward[i] = calculate_air_drag(car["v"])
+        drag_force[i] = calculate_air_drag(car["v"])
         desired_a, error[i] = calculate_desired_acceleration(car, kp, ki, kd)
         if not np.isfinite(desired_a):
             raise ValueError("Simulation produced a nonfinite command.")
         throttle_p = acceleration_to_throttle_percentage(desired_a)
         update(car, throttle_p)
 
-    return velocity, drag_feedforward, error
+    return velocity, drag_force, error
 
 
 def calculate_metrics(
@@ -163,18 +163,12 @@ def calculate_metrics(
         "y2_max": y2_max,
         "x_min": x_min,
         "x_max": x_max,
-        "y_min": y1_min,
-        "y_max": y1_max,
-        "drag_min": y2_min,
-        "drag_max": y2_max,
     }
 
     metrics = {
         "rise": rise_str,
         "settle": settle_str,
         "overshoot": overshoot_str,
-        "overshoot_pct": overshoot_pct,
-        "bounds": bounds,
     }
     points = {
         "pt_10": pt_10,
@@ -212,9 +206,9 @@ def update_response_marker(axis, artists: tuple, coordinate, title: str) -> None
 
 
 # Initial simulation run and metrics calculation
-velocity_over_dt, drag_over_dt, error_over_dt = run_simulation(K_P, K_I, K_D)
+velocity_over_time, drag_over_time, error_over_time = run_simulation(K_P, K_I, K_D)
 metrics, points, bounds = calculate_metrics(
-    dt_axis, velocity_over_dt, DESIRED_V, error=error_over_dt, drag=drag_over_dt
+    dt_axis, velocity_over_time, DESIRED_V, error=error_over_time, drag=drag_over_time
 )
 
 # Single graph figure setup with space for right-side controls and bottom fields
@@ -222,8 +216,8 @@ fig, ax1 = plt.subplots(figsize=(11, 7))
 plt.subplots_adjust(left=0.08, right=0.73, top=0.92, bottom=0.25)
 
 # Primary y-axis: Velocity (m/s) and Error (m/s)
-line_vel, = ax1.plot(dt_axis, velocity_over_dt, label="Velocity (m/s)", color="tab:blue", linewidth=2)
-line_err, = ax1.plot(dt_axis, error_over_dt, label="Error (m/s)", color="tab:orange", linestyle="--", linewidth=1.8)
+line_vel, = ax1.plot(dt_axis, velocity_over_time, label="Velocity (m/s)", color="tab:blue", linewidth=2)
+line_err, = ax1.plot(dt_axis, error_over_time, label="Error (m/s)", color="tab:orange", linestyle="--", linewidth=1.8)
 line_target = ax1.axhline(DESIRED_V, color="gray", linestyle=":", alpha=0.6, label=f"Target ({DESIRED_V:g} m/s)")
 ax1.set_xlabel("Time (s)", labelpad=42, fontsize=10)
 ax1.set_ylabel("Velocity / Error (m/s)")
@@ -234,7 +228,7 @@ ax1.set_ylim(bounds["y1_min"], bounds["y1_max"])
 
 # Secondary y-axis: Aerodynamic Drag Force (N)
 ax2 = ax1.twinx()
-line_drag, = ax2.plot(dt_axis, drag_over_dt, label="Drag Force (N)", color="tab:green", linewidth=2)
+line_drag, = ax2.plot(dt_axis, drag_over_time, label="Drag Force (N)", color="tab:green", linewidth=2)
 ax2.set_ylabel("Drag Force (N)", color="tab:green")
 ax2.tick_params(axis="y", labelcolor="tab:green")
 ax2.set_ylim(bounds["y2_min"], bounds["y2_max"])
@@ -315,18 +309,18 @@ def update_plot(_=None):
     line_drag.set_ydata(drag)
 
     # Recalculate metrics, markups, and bounds
-    mets, pts, bnds = calculate_metrics(dt_axis, vel, DESIRED_V, error=err, drag=drag)
+    metrics, points, bounds = calculate_metrics(dt_axis, vel, DESIRED_V, error=err, drag=drag)
 
     # Apply calculated bounds so curves never exceed window limits
-    ax1.set_ylim(bnds["y1_min"], bnds["y1_max"])
-    ax2.set_ylim(bnds["y2_min"], bnds["y2_max"])
+    ax1.set_ylim(bounds["y1_min"], bounds["y1_max"])
+    ax2.set_ylim(bounds["y2_min"], bounds["y2_max"])
 
-    update_markups(pts)
+    update_markups(points)
 
     # Update bottom cards
-    txt_rise.set_text(f"Rise Time (10-90%)\n{mets['rise']}")
-    txt_settle.set_text(f"{SETTLING_LABEL}\n{mets['settle']}")
-    txt_overshoot.set_text(f"Max Overshoot\n{mets['overshoot']}")
+    txt_rise.set_text(f"Rise Time (10-90%)\n{metrics['rise']}")
+    txt_settle.set_text(f"{SETTLING_LABEL}\n{metrics['settle']}")
+    txt_overshoot.set_text(f"Max Overshoot\n{metrics['overshoot']}")
 
     fig.canvas.draw_idle()
 
