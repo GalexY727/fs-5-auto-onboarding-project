@@ -18,7 +18,10 @@ DESIRED_V = 20.0
 DESIRED_TIME_S = 75
 DT = 0.02
 STEPS = int(DESIRED_TIME_S / DT)
-dt_axis = np.linspace(0, DESIRED_TIME_S, STEPS)
+# Samples are recorded before each update, starting at t=0.
+dt_axis = np.arange(STEPS) * DT
+SETTLING_TOLERANCE = 0.01
+SETTLING_LABEL = f"Settling Time (±{SETTLING_TOLERANCE:.0%})"
 
 
 def run_simulation(kp: float, ki: float, kd: float):
@@ -89,7 +92,7 @@ def calculate_metrics(
         overshoot_str = "0.00%"
 
     # Settling time (within +/- 1% error band of target_v)
-    tolerance = 0.01 * target_v
+    tolerance = SETTLING_TOLERANCE * target_v
     out_of_band = np.where(np.abs(velocity - target_v) > tolerance)[0]
     if len(out_of_band) == 0:
         pt_settle = (time[0], velocity[0])
@@ -182,7 +185,7 @@ plt.subplots_adjust(left=0.08, right=0.73, top=0.92, bottom=0.25)
 # Primary y-axis: Velocity (m/s) and Error (m/s)
 line_vel, = ax1.plot(dt_axis, velocity_over_dt, label="Velocity (m/s)", color="tab:blue", linewidth=2)
 line_err, = ax1.plot(dt_axis, error_over_dt, label="Error (m/s)", color="tab:orange", linestyle="--", linewidth=1.8)
-line_target = ax1.axhline(DESIRED_V, color="gray", linestyle=":", alpha=0.6, label="Target (20 m/s)")
+line_target = ax1.axhline(DESIRED_V, color="gray", linestyle=":", alpha=0.6, label=f"Target ({DESIRED_V:g} m/s)")
 ax1.set_xlabel("Time (s)", labelpad=42, fontsize=10)
 ax1.set_ylabel("Velocity / Error (m/s)")
 ax1.set_title("Vehicle Velocity, Error, and Aerodynamic Drag over Time")
@@ -205,7 +208,7 @@ ax1.legend(lines, labels, loc="center right")
 # Metric display fields placed under the bottom of the graph
 bbox_props = dict(boxstyle="round,pad=0.6", facecolor="#f8f9fa", edgecolor="#cccccc", linewidth=1.2)
 txt_rise = fig.text(0.19, 0.04, f"Rise Time (10-90%)\n{metrics['rise']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
-txt_settle = fig.text(0.41, 0.04, f"Settling Time (±2%)\n{metrics['settle']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
+txt_settle = fig.text(0.41, 0.04, f"{SETTLING_LABEL}\n{metrics['settle']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
 txt_overshoot = fig.text(0.63, 0.04, f"Max Overshoot\n{metrics['overshoot']}", ha="center", va="center", fontsize=10, bbox=bbox_props)
 
 # Markup point markers and vertical drop lines (y <= vehicle velocity intercept point)
@@ -307,14 +310,14 @@ def update_markups(pts: dict, mets: dict):
         line_vl_overshoot.set_visible(False)
         ann_overshoot.set_visible(False)
 
-    # Settling point (±2%)
+    # Settling point
     if pt_settle:
         line_pt_settle.set_data([pt_settle[0]], [pt_settle[1]])
         line_pt_settle.set_visible(True)
         line_vl_settle.set_data([pt_settle[0], pt_settle[0]], [ymin, pt_settle[1]])
         line_vl_settle.set_visible(True)
         ann_settle.xy = (pt_settle[0], 0)
-        ann_settle.set_text(f"Settling (±2%) ({pt_settle[0]:.1f}s)")
+        ann_settle.set_text(f"{SETTLING_LABEL} ({pt_settle[0]:.1f}s)")
         ann_settle.set_visible(True)
     else:
         line_pt_settle.set_visible(False)
@@ -374,7 +377,7 @@ def update_plot(_=None):
 
     # Update bottom cards
     txt_rise.set_text(f"Rise Time (10-90%)\n{mets['rise']}")
-    txt_settle.set_text(f"Settling Time (±2%)\n{mets['settle']}")
+    txt_settle.set_text(f"{SETTLING_LABEL}\n{mets['settle']}")
     txt_overshoot.set_text(f"Max Overshoot\n{mets['overshoot']}")
 
     fig.canvas.draw_idle()
